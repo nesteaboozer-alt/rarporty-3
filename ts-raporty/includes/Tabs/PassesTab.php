@@ -38,34 +38,35 @@ final class PassesTab implements TabInterface {
 
     public function get_csv_headers(): array {
         return [
-            'ID karnetu','Kod','ID zamówienia','Data zakupu','Status zamówienia','Metoda płatności','NIP',
-            'ID produktu','Produkt','Wartość brutto / kod',
-            'Typ','Wejścia (łącznie)','Wejścia (pozostało)','Okres od','Okres do',
-            'Status karnetu','Klasyfikacja','Data użycia/wygaśnięcia'
+            'ID karnetu', 'Kod', 'ID zamówienia', 'Data zakupu', 'Status zamówienia', 'Metoda płatności', 'NIP',
+            'ID produktu', 'Produkt', 'Wartość brutto / kod',
+            'Typ', 'Wejścia (łącznie)', 'Wejścia (pozostało)', 'Okres od', 'Okres do',
+            'Status karnetu', 'Klasyfikacja', 'Data użycia/wygaśnięcia'
         ];
     }
 
-public function get_export_rows(FilterDTO $filters): iterable {
-        foreach ($this->stream_pass_rows($filters) as $r) {
+public function get_export_rows(FilterDTO $f): iterable {
+        foreach ($this->stream_pass_rows($f) as $r) {
             yield [
-                (string)$r['ticket_id'],
-                (string)$r['code'],
-                (string)$r['order_id'],
-                (string)$r['order_date'],
-                (string)$r['order_status'],
-                (string)$r['payment_method'],
-                (string)$r['invoice_nip'],
-                (string)$r['product_id'],
-                (string)$r['product_name'],
-                (string)$r['gross_value_raw'],
-                (string)$r['ticket_type'],
-                (string)$r['entries_total'],
-                (string)$r['entries_left'],
-                (string)$r['period_started_at'],
-                (string)$r['period_expires_at'],
-                (string)$r['status'],
-                (string)$r['classification'],
-                (string)$r['event_date'],
+                $r['ticket_id'],
+                // Dodajemy cudzysłów i separator, aby wymusić tekst w Excelu
+                '="' . (string)$r['code'] . '"', 
+                $r['order_id'],
+                $r['order_date'],
+                $r['order_status'],
+                $r['payment_method'],
+                '="' . (string)$r['invoice_nip'] . '"',
+                $r['product_id'],
+                $r['product_name'],
+                str_replace('.', ',', (string)$r['gross_value_raw']), // Zamiana kropki na przecinek dla polskiego Excela
+                $r['ticket_type'],
+                $r['entries_total'],
+                $r['entries_left'],
+                $r['period_started_at'],
+                $r['period_expires_at'],
+                $r['status'],
+                $r['classification'],
+                $r['event_date'], // Ta wartość musi być wyliczona w stream_pass_rows
             ];
         }
     }
@@ -205,10 +206,28 @@ public function get_export_rows(FilterDTO $filters): iterable {
                 }
             }
 
-            if ($is_exhausted) { $classification = 'exhausted'; }
-            elseif ($is_expired_period) { $classification = 'expired'; }
-            elseif ($is_initial_expired) { $classification = 'initial_expired'; }
-            else { continue; } // This tab shows only used/expired.
+            $event_date = '';
+            if ($is_exhausted) { 
+                $classification = 'exhausted';
+                $event_date = (string)($t['last_checked_at'] ?? '');
+            } elseif ($is_expired_period) { 
+                $classification = 'expired';
+                $event_date = $period_expires_at;
+            } elseif ($is_initial_expired) { 
+                $classification = 'initial_expired';
+                // Dla przeterminowanych (90 dni) wyliczamy datę graniczną
+                if ($order->get_date_created()) {
+                    $event_date = date('Y-m-d H:i:s', $order->get_date_created()->getTimestamp() + (90 * DAY_IN_SECONDS));
+                }
+            } else { continue; }
+
+            // Filtracja po dacie zdarzenia (jeśli ustawiona w filtrach)
+            if (!empty($f->event_date_from) || !empty($f->event_date_to)) {
+                if (empty($event_date)) { continue; }
+                $evt_ts = strtotime($event_date);
+                if (!empty($f->event_date_from) && $evt_ts < strtotime($f->event_date_from . ' 00:00:00')) { continue; }
+                if (!empty($f->event_date_to) && $evt_ts > strtotime($f->event_date_to . ' 23:59:59')) { continue; }
+            }
 
             // Product filter (by product_id in ticket row)
             if (!empty($f->product_ids) && !in_array((int)$product_id, $f->product_ids, true)) { continue; }
@@ -232,6 +251,7 @@ public function get_export_rows(FilterDTO $filters): iterable {
                 'period_expires_at' => $period_expires_at,
                 'status' => $status,
                 'classification' => $classification,
+                'event_date' => $event_date,
             ];
         }
     }

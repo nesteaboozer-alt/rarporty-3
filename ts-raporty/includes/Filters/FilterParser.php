@@ -43,6 +43,11 @@ final class FilterParser {
         $event_date_mode = isset($request['event_date_mode']) ? sanitize_key((string)$request['event_date_mode']) : 'all';
         if (!in_array($event_date_mode, ['all','with','without'], true)) { $event_date_mode = 'all'; }
 
+        $buildings = isset($request['buildings']) ? (array)$request['buildings'] : [];
+        $buildings = array_values(array_filter(array_map('sanitize_text_field', $buildings)));
+
+        $product_names = isset($request['product_names']) ? (array)$request['product_names'] : [];
+        $product_names = array_values(array_filter(array_map('sanitize_text_field', $product_names)));
 
         return new FilterDTO([
             'date_from' => $date_from,
@@ -56,6 +61,8 @@ final class FilterParser {
             'event_date_from' => $event_date_from,
             'event_date_to' => $event_date_to,
             'event_date_mode' => $event_date_mode,
+            'buildings' => $buildings,
+            'product_names' => $product_names,
         ]);
     }
 }
