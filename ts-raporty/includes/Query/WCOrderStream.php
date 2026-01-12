@@ -16,79 +16,78 @@ final class WCOrderStream {
     public static function orders(FilterDTO $f): \Generator {
         $args = [
             'orderby' => 'date',
-            'order' => 'DESC',
-            'return' => 'objects',
-            'limit' => 100,
-            'page' => 1,
+            'order'   => 'DESC',
+            'return'  => 'objects',
+            'limit'   => 100,
+            'page'    => 1,
         ];
 
-        // Ustawienie filtrów daty w zapytaniu
+        // Budowanie pancernego zapytania o daty
         if (!empty($f->date_from) || !empty($f->date_to)) {
-            $dc = [ 'inclusive' => true ];
-            if (!empty($f->date_from)) { 
-                $dc['after'] = date('Y-m-d 00:00:00', strtotime($f->date_from)); 
-            }
-            if (!empty($f->date_to)) { 
-                $dc['before'] = date('Y-m-d 23:59:59', strtotime($f->date_to)); 
-            }
-            $args['date_created'] = $dc;
+            $from = !empty($f->date_from) ? date('Y-m-d', strtotime($f->date_from)) : '2000-01-01';
+            $to   = !empty($f->date_to)   ? date('Y-m-d', strtotime($f->date_to))   : date('Y-m-d');
+            
+            // Format YYYY-MM-DD...YYYY-MM-DD jest najbezpieczniejszy dla WC_Order_Query
+            $args['date_created'] = $from . '...' . $to;
         }
 
-        // Statusy zamówień
+        // Statusy - rzutowanie na string dla bezpieczeństwa
         if (!empty($f->statuses)) {
-            $args['status'] = array_map(function($s){
+            $args['status'] = array_map(function($s) {
                 $s = (string)$s;
-                return strpos($s, 'wc-') === 0 ? substr($s, 3) : $s;
-            }, $f->statuses);
+                return (strpos($s, 'wc-') === 0) ? substr($s, 3) : $s;
+            }, (array)$f->statuses);
         }
 
-        // Metody płatności (optymalizacja dla pojedynczej metody)
-        if (!empty($f->payment_methods) && count($f->payment_methods) === 1) {
-            $args['payment_method'] = $f->payment_methods[0];
+        // Metody płatności - optymalizacja na poziomie SQL tylko dla pojedynczej
+        if (!empty($f->payment_methods) && count((array)$f->payment_methods) === 1) {
+            $methods = (array)$f->payment_methods;
+            $args['payment_method'] = $methods[0];
         }
 
         while (true) {
-            $q = new \WC_Order_Query($args);
-            $orders = $q->get_orders();
+            try {
+                $q = new \WC_Order_Query($args);
+                $orders = $q->get_orders();
+            } catch (\Exception $e) {
+                // Jeśli WC_Order_Query wywali błąd, przerywamy generator zamiast sypać krytykiem
+                break; 
+            }
 
             if (empty($orders)) {
                 break;
             }
 
             foreach ($orders as $order) {
-                if (!$order instanceof \WC_Order) { continue; }
+                if (!$order instanceof \WC_Order) {
+                    continue;
+                }
 
-                // Dodatkowa weryfikacja daty w PHP (bezpieczeństwo)
-                $created = $order->get_date_created();
-                if ($created) {
-                    $ts = $created->getTimestamp();
-                    if (!empty($f->date_from)) {
-                        $from_ts = strtotime($f->date_from . ' 00:00:00');
-                        if ($from_ts && $ts < $from_ts) { continue; }
-                    }
-                    if (!empty($f->date_to)) {
-                        $to_ts = strtotime($f->date_to . ' 23:59:59');
-                        if ($to_ts && $ts > $to_ts) { continue; }
+                // Filtracja wielu metod płatności w PHP (jeśli wybrano > 1)
+                if (!empty($f->payment_methods) && count((array)$f->payment_methods) > 1) {
+                    if (!in_array($order->get_payment_method(), (array)$f->payment_methods, true)) {
+                        continue;
                     }
                 }
 
-                // Filtracja wielu metod płatności w PHP
-                if (!empty($f->payment_methods) && count($f->payment_methods) > 1) {
-                    $pm = (string)$order->get_payment_method();
-                    if (!in_array($pm, $f->payment_methods, true)) { continue; }
-                }
-
-                // Filtracja NIP
+                // Filtracja NIP - teraz z rygorystycznym sprawdzeniem typów
                 if ($f->invoice_mode !== 'all') {
-                    $nip = (string)$order->get_meta('_billing_nip', true);
-                    if ($f->invoice_mode === 'with' && $nip === '') { continue; }
-                    if ($f->invoice_mode === 'without' && $nip !== '') { continue; }
+                    $nip = trim((string)$order->get_meta('_billing_nip', true));
+                    if ($f->invoice_mode === 'with' && $nip === '') {
+                        continue;
+                    }
+                    if ($f->invoice_mode === 'without' && $nip !== '') {
+                        continue;
+                    }
                 }
 
                 yield $order;
             }
 
             $args['page']++;
+            
+            // Zabezpieczenie przed nieskończoną pętlą przy błędach paginacji
+            if ($args['page'] > 1000) { break; } 
         }
     }
 }
