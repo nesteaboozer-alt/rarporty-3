@@ -87,6 +87,7 @@ final class MealsTab implements TabInterface {
             <thead>
                 <tr>
                     <th><?php esc_html_e('Zamówienie', 'ts-raporty'); ?></th>
+                    <th><?php esc_html_e('Pochodzenie', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Data', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Produkt', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Ilość', 'ts-raporty'); ?></th>
@@ -104,6 +105,12 @@ final class MealsTab implements TabInterface {
             <?php else: foreach ($rows as $r): ?>
                 <tr>
                     <td>#<?php echo esc_html($r['order_id']); ?></td>
+                    <td>
+                        <?php 
+                        $via = strtolower((string)$r['created_via']);
+                        echo ($via === 'admin' || $via === 'manual' || !$via) ? '<span style="color:#f59e0b; font-weight:bold;">Panel administratora</span>' : 'Bezpośrednie';
+                        ?>
+                    </td>
                     <td><?php echo esc_html($r['order_date']); ?></td>
                     <td><?php echo esc_html($r['product_name']); ?> (<?php echo esc_html($r['product_id']); ?>)</td>
                     <td><?php echo esc_html($r['qty']); ?></td>
@@ -180,6 +187,7 @@ final class MealsTab implements TabInterface {
                     'adults' => $get_meta('_tsme_adults'),
                     'children' => $get_meta('_tsme_children'),
                     'meal_code' => $get_meta('_tsme_code'),
+                    'created_via' => (string)$order->get_created_via(), // DODAJ TO
                 ];
             }
         }

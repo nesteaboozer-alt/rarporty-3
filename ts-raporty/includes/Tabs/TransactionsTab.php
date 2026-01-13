@@ -45,34 +45,29 @@ final class TransactionsTab implements TabInterface {
 
     public function get_csv_headers(): array {
         return [
-            'ID zamówienia',
-            'Data',
-            'Status',
-            'Metoda płatności',
-            'NIP',
-            'ID produktu',
-            'Produkt',
-            'Ilość',
-            'Cena jednostkowa',
-            'Wartość',
-            'Waluta'
+            'Pochodzenie', 'Faktura', 'ID zamówienia', 'Data', 'Status', 'Metoda płatności', 
+            'NIP', 'Klient', 'ID produktu', 'Produkt', 'Ilość', 'Wartość'
         ];
     }
 
     public function get_export_rows(FilterDTO $filters): iterable {
         foreach ($this->stream_item_rows($filters) as $row) {
+            $via = strtolower((string)$row['created_via']);
+            $origin = ($via === 'admin' || $via === 'manual' || !$via) ? 'Panel administratora' : (($via === 'checkout') ? 'Bezpośrednie' : $via);
+
             yield [
+                $origin,
+                (!empty($row['invoice_nip']) ? 'TAK' : 'NIE'),
                 (string)$row['order_id'],
                 (string)$row['order_date'],
                 (string)$row['status'],
                 (string)$row['payment_method'],
-                (string)$row['invoice_nip'],
+                '="' . (string)$row['invoice_nip'] . '"',
                 (string)$row['customer'],
                 (string)$row['product_id'],
                 (string)$row['product_name'],
                 (string)$row['qty'],
-                (string)$row['unit_value_raw'],
-                (string)$row['line_total_raw'],
+                str_replace('.', ',', (string)$row['line_total_raw']),
             ];
         }
     }
@@ -83,6 +78,8 @@ final class TransactionsTab implements TabInterface {
         <table class="widefat fixed striped">
             <thead>
                 <tr>
+                    <th><?php esc_html_e('Pochodzenie', 'ts-raporty'); ?></th>
+                    <th><?php esc_html_e('Faktura', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Zamówienie', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Data', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Status', 'ts-raporty'); ?></th>
@@ -98,18 +95,29 @@ final class TransactionsTab implements TabInterface {
             <tbody>
             <?php if (empty($rows)): ?>
                 <tr><td colspan="10"><?php esc_html_e('Brak danych dla wybranych filtrów.', 'ts-raporty'); ?></td></tr>
-            <?php else: foreach ($rows as $r): ?>
+            <?php else: foreach ($rows as $r): 
+                // 1. Ujednolicona logika etykiet pochodzenia (zgodna z Twoim WC)
+                $via = strtolower((string)$r['created_via']);
+                if ($via === 'admin' || $via === 'manual' || empty($via)) {
+                    $origin_html = '<span style="color:#f59e0b; font-weight:bold;">' . __('Panel administratora', 'ts-raporty') . '</span>';
+                } elseif ($via === 'checkout') {
+                    $origin_html = __('Bezpośrednie', 'ts-raporty'); // To co widzisz w WC
+                } else {
+                    $origin_html = esc_html(ucfirst($via));
+                }
+
+                $invoice_text = !empty($r['invoice_nip']) ? __('Tak', 'ts-raporty') : __('Nie', 'ts-raporty');
+                $invoice_style = !empty($r['invoice_nip']) ? 'font-weight:bold; color:#16a34a;' : 'opacity:0.5;';
+            ?>
                 <tr>
-                    <td>#<?php echo esc_html($r['order_id']); ?></td>
-                    <td><?php echo esc_html($r['order_date']); ?></td>
-                    <td><?php echo esc_html($r['status']); ?></td>
+                    <td><?php echo $origin_html; ?></td> <td style="<?php echo $invoice_style; ?>"><?php echo esc_html($invoice_text); ?></td> <td>#<?php echo esc_html($r['order_id']); ?></td> <td><?php echo esc_html($r['order_date']); ?></td> <td><?php echo esc_html($r['status']); ?></td>
                     <td><?php echo esc_html($r['payment_method']); ?></td>
                     <td><?php echo esc_html($r['invoice_nip']); ?></td>
                     <td><?php echo esc_html($r['customer']); ?></td>
                     <td><?php echo esc_html($r['product_name']); ?> (<?php echo esc_html($r['product_id']); ?>)</td>
                     <td><?php echo esc_html($r['qty']); ?></td>
-                    <td><?php echo $r['unit_value']; // phpcs:ignore ?></td>
-                    <td><?php echo $r['line_total']; // phpcs:ignore ?></td>
+                    <td><?php echo $r['unit_value']; ?></td>
+                    <td><?php echo $r['line_total']; ?></td>
                 </tr>
             <?php endforeach; endif; ?>
             </tbody>
@@ -133,19 +141,21 @@ final class TransactionsTab implements TabInterface {
                 $product_id = $product ? $product->get_id() : (int)$item->get_product_id();
                 $product_name = $item->get_name();
 
-                // Product filter
-                if (!empty($f->product_ids) && !in_array((int)$product_id, $f->product_ids, true)) {
-                    continue;
+                // 1. Filtracja po Nazwach Produktów (Spójność z bazą danych)
+                if (!empty($f->product_names)) {
+                    // Sprawdzamy nazwę zapisaną w zamówieniu (tak jak robiliśmy to w SQL wyżej)
+                    if (!in_array($product_name, (array)$f->product_names, true)) {
+                        continue;
+                    }
                 }
 
-                // Category filter
+                // 2. Filtracja po Kategoriach
                 if (!empty($f->categories)) {
-                    $cats = $product ? $product->get_category_ids() : [];
-                    $ok = false;
-                    foreach ($cats as $cid) {
-                        if (in_array((int)$cid, $f->categories, true)) { $ok = true; break; }
+                    $item_product_id = $item->get_product_id();
+                    $item_cats = wp_get_post_terms($item_product_id, 'product_cat', ['fields' => 'ids']);
+                    if (is_wp_error($item_cats) || empty(array_intersect($item_cats, (array)$f->categories))) {
+                        continue;
                     }
-                    if (!$ok) { continue; }
                 }
 
                 $qty = (float)$item->get_quantity();
@@ -172,6 +182,7 @@ final class TransactionsTab implements TabInterface {
                     'line_total' => Format::money((float)$line_total),
                     'unit_value_raw' => (string)wc_format_decimal((float)$unit, 2),
                     'line_total_raw' => (string)wc_format_decimal((float)$line_total, 2),
+                    'created_via' => (string)$order->get_created_via(), // Wymuszamy string
                 ];
             }
         }

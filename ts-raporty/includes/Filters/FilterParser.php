@@ -49,6 +49,9 @@ final class FilterParser {
         $product_names = isset($request['product_names']) ? (array)$request['product_names'] : [];
         $product_names = array_values(array_filter(array_map('sanitize_text_field', $product_names)));
 
+        $origin_mode = isset($request['origin_mode']) && in_array($request['origin_mode'], ['all', 'web', 'admin'], true)
+            ? $request['origin_mode'] : 'all';
+
         return new FilterDTO([
             'date_from' => $date_from,
             'date_to' => $date_to,
@@ -63,6 +66,7 @@ final class FilterParser {
             'event_date_mode' => $event_date_mode,
             'buildings' => $buildings,
             'product_names' => $product_names,
+            'origin_mode' => $origin_mode,
         ]);
     }
 }

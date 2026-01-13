@@ -78,6 +78,7 @@ public function get_export_rows(FilterDTO $f): iterable {
             <thead>
                 <tr>
                     <th><?php esc_html_e('Kod', 'ts-raporty'); ?></th>
+                    <th><?php esc_html_e('Pochodzenie', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Zamówienie', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('Data zakupu', 'ts-raporty'); ?></th>
                     <th><?php esc_html_e('NIP', 'ts-raporty'); ?></th>
@@ -96,6 +97,12 @@ public function get_export_rows(FilterDTO $f): iterable {
             <?php else: foreach ($rows as $r): ?>
                 <tr>
                     <td><?php echo esc_html($r['code']); ?></td>
+                    <td>
+                        <?php 
+                        $via = strtolower((string)$r['created_via']);
+                        echo ($via === 'admin' || $via === 'manual' || !$via) ? '<span style="color:#f59e0b; font-weight:bold;">Panel administratora</span>' : 'Bezpośrednie';
+                        ?>
+                    </td>
                     <td>#<?php echo esc_html($r['order_id']); ?></td>
                     <td><?php echo esc_html($r['order_date']); ?></td>
                     <td><?php echo esc_html($r['invoice_nip']); ?></td>
@@ -252,6 +259,7 @@ public function get_export_rows(FilterDTO $f): iterable {
                 'status' => $status,
                 'classification' => $classification,
                 'event_date' => $event_date,
+                'created_via' => (string)$order->get_created_via(), // DODAJ TO
             ];
         }
     }

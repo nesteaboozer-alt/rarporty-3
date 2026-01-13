@@ -15,6 +15,7 @@ final class FilterDTO {
     public $event_date_from; // Y-m-d (passes)
     public $event_date_to;   // Y-m-d (passes)
     public $event_date_mode; // 'all'|'with'|'without' (passes)
+    public string $origin_mode = 'all'; // NOWE: 'all'|'web'|'admin'
     public array $buildings = []; // Nowe pole
     public array $product_names = []; // Nowe pole dla multiselecta nazw
 
@@ -30,6 +31,7 @@ final class FilterDTO {
         $this->event_date_from = (string)($args['event_date_from'] ?? '');
         $this->event_date_to = (string)($args['event_date_to'] ?? '');
         $this->event_date_mode = (string)($args['event_date_mode'] ?? 'all');
+        $this->origin_mode = (string)($args['origin_mode'] ?? 'all');
         $this->buildings = (array)($args['buildings'] ?? []);
         $this->product_names = (array)($args['product_names'] ?? []);
     }

@@ -45,6 +45,43 @@ final class WCOrderStream {
             $args['payment_method'] = $methods[0];
         }
 
+        // --- OPTYMALIZACJA SQL: Filtracja Produktów i Kategorii ---
+        if (!empty($f->product_names) || !empty($f->categories)) {
+            global $wpdb;
+            $found_order_ids = [];
+
+            // Szukanie po nazwach produktów
+            if (!empty($f->product_names)) {
+                $names_placeholder = implode("','", array_map('esc_sql', $f->product_names));
+                $found_order_ids = $wpdb->get_col("
+                    SELECT DISTINCT order_id FROM {$wpdb->prefix}woocommerce_order_items 
+                    WHERE order_item_name IN ('$names_placeholder') AND order_item_type = 'line_item'
+                ");
+            }
+
+            // Szukanie po kategoriach
+            if (!empty($f->categories)) {
+                $cat_ids = implode(",", array_map('absint', $f->categories));
+                $cat_order_ids = $wpdb->get_col("
+                    SELECT DISTINCT oi.order_id 
+                    FROM {$wpdb->prefix}woocommerce_order_items oi
+                    JOIN {$wpdb->prefix}woocommerce_order_itemmeta oim ON oi.order_item_id = oim.order_item_id
+                    JOIN {$wpdb->prefix}term_relationships tr ON oim.meta_value = tr.object_id
+                    WHERE oim.meta_key = '_product_id' AND tr.term_taxonomy_id IN ($cat_ids)
+                ");
+                
+                // Jeśli filtrowaliśmy już po nazwach, wyciągamy część wspólną. Jeśli nie - bierzemy wyniki z kategorii.
+                if (!empty($f->product_names)) {
+                    $found_order_ids = array_intersect($found_order_ids, $cat_order_ids);
+                } else {
+                    $found_order_ids = $cat_order_ids;
+                }
+            }
+
+            if (empty($found_order_ids)) { return; } // Nic nie znaleziono - kończymy generator
+            $args['post__in'] = array_map('absint', $found_order_ids);
+        }
+
         while (true) {
             try {
                 $q = new \WC_Order_Query($args);
@@ -139,6 +176,16 @@ final class WCOrderStream {
                     if ($f->invoice_mode === 'without' && $nip !== '') {
                         continue;
                     }
+                }
+
+                // Filtracja po Pochodzeniu (Origin)
+                if ($f->origin_mode !== 'all') {
+                    $via = strtolower((string)$order->get_meta('_created_via', true));
+                    // Za ADMINA uznajemy 'admin', 'manual' lub puste pole (częste przy ręcznych zamówieniach)
+                    $is_admin = ($via === 'admin' || $via === 'manual' || $via === '');
+                    
+                    if ($f->origin_mode === 'admin' && !$is_admin) { continue; }
+                    if ($f->origin_mode === 'web' && $is_admin) { continue; }
                 }
 
                 yield $order;

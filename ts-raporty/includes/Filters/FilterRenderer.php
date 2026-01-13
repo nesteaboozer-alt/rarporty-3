@@ -50,6 +50,15 @@ ob_start();
                     </select>
                 </div>
 
+                <div class="tsr-filter-group">
+                    <label style="display:block; font-weight:bold; margin-bottom:5px;"><?php esc_html_e('Pochodzenie:', 'ts-raporty'); ?></label>
+                    <select name="origin_mode" style="width:180px;">
+                        <option value="all" <?php selected($f->origin_mode, 'all'); ?>><?php esc_html_e('Wszystkie pochodzenia', 'ts-raporty'); ?></option>
+                        <option value="web" <?php selected($f->origin_mode, 'web'); ?>><?php esc_html_e('Sklep (WWW)', 'ts-raporty'); ?></option>
+                        <option value="admin" <?php selected($f->origin_mode, 'admin'); ?>><?php esc_html_e('Panel Administratora', 'ts-raporty'); ?></option>
+                    </select>
+                </div>
+
                 <div style="display:flex; gap:20px; flex-wrap:wrap; width:100%;">
                     <div class="tsr-filter-group">
                         <label style="display:block; font-weight:bold; margin-bottom:5px;"><?php esc_html_e('Statusy zamówień', 'ts-raporty'); ?></label>
