@@ -9,94 +9,113 @@ if (!defined('ABSPATH')) { exit; }
 final class DailyReporter {
 
     public static function send_report() {
-        // 1. Ustalenie daty (wczoraj)
         $yesterday = date('Y-m-d', strtotime('-1 day'));
         
         $f = new FilterDTO();
         $f->date_from = $yesterday;
         $f->date_to   = $yesterday;
-        $f->statuses  = ['completed', 'processing']; // Liczymy zrealizowane i w trakcie
-        $f->values_mode = 'gross'; // Interesuje nas brutto
+        $f->statuses  = ['completed', 'processing'];
+        $f->values_mode = 'gross';
 
-        $sections = [
-            'passes' => ['title' => 'KARNETY / ZABIEGI', 'items' => [], 'total' => 0],
-            'meals'  => ['title' => 'POSIŁKI (HOTEL)', 'items' => [], 'total' => 0],
-            'other'  => ['title' => 'POZOSTAŁE', 'items' => [], 'total' => 0],
-        ];
+        $agg = self::get_aggregated_data($f);
+        if (empty($agg['data'])) return;
 
-        // 2. Agregacja danych
+        $file_path = self::generate_csv($agg['data'], 'raport-' . $yesterday);
+        $body = self::get_html_body($agg['data'], $agg['total'], $yesterday, $yesterday);
+        
+        // Pobieramy listę e-maili z opcji, domyślnie e-mail admina
+        $emails_raw = get_option('tsr_report_emails', get_option('admin_email'));
+        // Rozbijamy po przecinku i czyścimy
+        $to = array_filter(array_map('trim', explode(',', $emails_raw)), 'is_email');
+        
+        if (empty($to)) {
+            $to = get_option('admin_email');
+        }
+        
+        // Naprawa encji HTML w tytule maila
+        $total_formatted = html_entity_decode(strip_tags(wc_price($agg['total'])), ENT_QUOTES, 'UTF-8');
+        $total_formatted = str_replace("\xc2\xa0", ' ', $total_formatted); // Zamiana twardej spacji na zwykłą
+        
+        $subject = "Raport Sprzedaży $yesterday | Suma: " . $total_formatted;
+
+        wp_mail($to, $subject, $body, ['Content-Type: text/html; charset=UTF-8'], [$file_path]);
+        unlink($file_path);
+    }
+
+    public static function get_aggregated_data(FilterDTO $f) {
+        $agg = [];
+        $total_sum = 0;
+
         foreach (WCOrderStream::orders($f) as $order) {
             foreach ($order->get_items('line_item') as $item) {
                 $product = $item->get_product();
                 if (!$product) continue;
 
-                $product_id = $product->get_id();
                 $name = $item->get_name();
                 $qty  = (float)$item->get_quantity();
                 $val  = (float)$item->get_total() + (float)$item->get_total_tax();
 
-                // Klasyfikacja
-                $type = 'other';
-                if ($product->get_meta('_tsme_enabled', true) === 'yes') {
-                    $type = 'meals';
-                } elseif ($product->get_meta('_ts_ticket_type', true)) {
-                    $type = 'passes';
+                $type = 'Pozostałe';
+                if ($product->get_meta('_tsme_enabled', true) === 'yes') { $type = 'Posiłek'; }
+                elseif ($product->get_meta('_ts_ticket_type', true)) { $type = 'Karnet'; }
+
+                $building = $item->get_meta('_tsme_object', true);
+                if (empty($building)) {
+                    $ln = mb_strtolower($name);
+                    if (strpos($ln, 'panorama') !== false) $building = 'Panorama';
+                    elseif (strpos($ln, 'czarna perła') !== false) $building = 'Czarna Perła';
+                    elseif (strpos($ln, 'biała perła') !== false) $building = 'Biała Perła';
+                    else $building = 'Nieokreślony';
                 }
 
-                if (!isset($sections[$type]['items'][$product_id])) {
-                    $sections[$type]['items'][$product_id] = ['name' => $name, 'qty' => 0, 'sum' => 0];
+                $key = $type . '_' . $product->get_id() . '_' . $building;
+                if (!isset($agg[$key])) {
+                    $agg[$key] = ['type' => $type, 'id' => $product->get_id(), 'name' => $name, 'building' => $building, 'qty' => 0, 'sum' => 0];
                 }
-
-                $sections[$type]['items'][$product_id]['qty'] += $qty;
-                $sections[$type]['items'][$product_id]['sum'] += $val;
-                $sections[$type]['total'] += $val;
+                $agg[$key]['qty'] += $qty;
+                $agg[$key]['sum'] += $val;
+                $total_sum += $val;
             }
         }
+        return ['data' => $agg, 'total' => $total_sum];
+    }
 
-        // 3. Budowanie HTML
-        $total_day = $sections['passes']['total'] + $sections['meals']['total'] + $sections['other']['total'];
-        if ($total_day <= 0) return; // Jeśli nic nie sprzedano, nie wysyłaj pustego maila
+    public static function generate_csv($data, $filename) {
+        $upload_dir = wp_upload_dir();
+        $path = $upload_dir['basedir'] . '/' . $filename . '.csv';
+        $fh = fopen($path, 'w');
+        fprintf($fh, chr(0xEF).chr(0xBB).chr(0xBF));
+        fputcsv($fh, ['Sekcja', 'ID Produktu', 'Produkt', 'Budynek', 'Ilość', 'Wartość Brutto'], ';');
+        foreach ($data as $row) {
+            fputcsv($fh, [$row['type'], $row['id'], $row['name'], $row['building'], $row['qty'], number_format($row['sum'], 2, ',', '')], ';');
+        }
+        fclose($fh);
+        return $path;
+    }
 
+    public static function get_html_body($data, $total, $from, $to) {
         ob_start();
         ?>
-        <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px;">
-            <h2>Raport sprzedaży z dnia: <?php echo $yesterday; ?></h2>
-            <?php foreach ($sections as $key => $sec): if (empty($sec['items'])) continue; ?>
-                <h3 style="background: #f4f4f4; padding: 10px; border-left: 4px solid #000;"><?php echo $sec['title']; ?></h3>
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                    <thead>
-                        <tr style="text-align: left; border-bottom: 2px solid #eee;">
-                            <th style="padding: 8px;">Produkt</th>
-                            <th style="padding: 8px;">Ilość</th>
-                            <th style="padding: 8px;">Wartość</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($sec['items'] as $item): ?>
-                            <tr style="border-bottom: 1px solid #eee;">
-                                <td style="padding: 8px;"><?php echo esc_html($item['name']); ?></td>
-                                <td style="padding: 8px;"><?php echo $item['qty']; ?></td>
-                                <td style="padding: 8px;"><?php echo wc_price($item['sum']); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <td colspan="2" style="padding: 8px; font-weight: bold; text-align: right;">Suma sekcji:</td>
-                            <td style="padding: 8px; font-weight: bold;"><?php echo wc_price($sec['total']); ?></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            <?php endforeach; ?>
-            <div style="background: #000; color: #fff; padding: 15px; text-align: right; font-size: 18px;">
-                <strong>SUMA ŁĄCZNA: <?php echo wc_price($total_day); ?></strong>
+        <div style="font-family: Arial, sans-serif; color: #333; max-width: 800px;">
+            <h2>Raport sprzedaży: <?php echo ($from === $to) ? $from : "$from - $to"; ?></h2>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                <tr style="background: #000; color: #fff; text-align: left;">
+                    <th style="padding: 10px;">Budynek</th><th style="padding: 10px;">Produkt</th><th style="padding: 10px;">Ilość</th><th style="padding: 10px; text-align: right;">Suma</th>
+                </tr>
+                <?php foreach ($data as $r): ?>
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 10px;"><strong><?php echo esc_html($r['building']); ?></strong><br><small><?php echo $r['type']; ?></small></td>
+                    <td style="padding: 10px;"><?php echo esc_html($r['name']); ?></td>
+                    <td style="padding: 10px; text-align: center;"><?php echo $r['qty']; ?></td>
+                    <td style="padding: 10px; text-align: right;"><?php echo wc_price($r['sum']); ?></td>
+                </tr>
+                <?php endforeach; ?>
+            </table>
+            <div style="margin-top: 20px; padding: 15px; background: #000; color: #fff; text-align: right; font-size: 18px;">
+                <strong>SUMA ŁĄCZNA: <?php echo strip_tags(wc_price($total)); ?></strong>
             </div>
         </div>
         <?php
-        $body = ob_get_clean();
-        $to = get_option('admin_email');
-        $subject = "Raport Sprzedaży: $yesterday (" . wc_price($total_day) . ")";
-
-        wp_mail($to, $subject, $body, ['Content-Type: text/html; charset=UTF-8']);
+        return ob_get_clean();
     }
 }

@@ -24,13 +24,10 @@ add_action('plugins_loaded', function() {
     \TSR\Core\Plugin::instance();
 });
 
-// Harmonogram raportu dziennego
+// Harmonogram raportu produkcyjnego
 register_activation_hook(__FILE__, function() {
     if (!wp_next_scheduled('tsr_daily_report_cron')) {
-        // Ustawienie na 01:00 w nocy czasu lokalnego
-        $timestamp = strtotime('today 01:00:00');
-        if ($timestamp < time()) { $timestamp = strtotime('tomorrow 01:00:00'); }
-        wp_schedule_event($timestamp, 'daily', 'tsr_daily_report_cron');
+        wp_schedule_event(strtotime('tomorrow 01:00:00'), 'daily', 'tsr_daily_report_cron');
     }
 });
 
@@ -38,12 +35,15 @@ register_deactivation_hook(__FILE__, function() {
     wp_clear_scheduled_hook('tsr_daily_report_cron');
 });
 
-// Podpięcie akcji do crona
 add_action('tsr_daily_report_cron', [\TSR\Core\DailyReporter::class, 'send_report']);
 
+// Linki wyzwalające test i produkcję ręcznie
 add_action('init', function() {
-    if (isset($_GET['test_report'])) {
+    if (isset($_GET['run_prod_report'])) { // Ręczne wywołanie raportu za wczoraj
         \TSR\Core\DailyReporter::send_report();
-        die('Raport wysłany na e-mail: ' . get_option('admin_email'));
+        die('Raport produkcyjny wysłany.');
+    }
+    if (isset($_GET['run_test_report'])) { // Testowy zakres 01.12 - 13.12
+        \TSR\Core\DailyReporterTest::run_test();
     }
 });

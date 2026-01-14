@@ -5,6 +5,7 @@ use TSR\Tabs\TransactionsTab;
 use TSR\Tabs\SalesSummaryTab;
 use TSR\Tabs\MealsTab;
 use TSR\Tabs\PassesTab;
+use TSR\Tabs\SettingsTab;
 
 if (!defined('ABSPATH')) { exit; }
 
@@ -24,6 +25,7 @@ final class TabRegistry {
         $this->register(new SalesSummaryTab());
         $this->register(new MealsTab());
         $this->register(new PassesTab());
+        $this->register(new SettingsTab());
     }
 
     private function register(TabInterface $tab): void {
