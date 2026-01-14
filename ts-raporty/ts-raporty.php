@@ -23,3 +23,27 @@ add_action('plugins_loaded', function() {
     if (!class_exists('WooCommerce')) { return; }
     \TSR\Core\Plugin::instance();
 });
+
+// Harmonogram raportu dziennego
+register_activation_hook(__FILE__, function() {
+    if (!wp_next_scheduled('tsr_daily_report_cron')) {
+        // Ustawienie na 01:00 w nocy czasu lokalnego
+        $timestamp = strtotime('today 01:00:00');
+        if ($timestamp < time()) { $timestamp = strtotime('tomorrow 01:00:00'); }
+        wp_schedule_event($timestamp, 'daily', 'tsr_daily_report_cron');
+    }
+});
+
+register_deactivation_hook(__FILE__, function() {
+    wp_clear_scheduled_hook('tsr_daily_report_cron');
+});
+
+// Podpięcie akcji do crona
+add_action('tsr_daily_report_cron', [\TSR\Core\DailyReporter::class, 'send_report']);
+
+add_action('init', function() {
+    if (isset($_GET['test_report'])) {
+        \TSR\Core\DailyReporter::send_report();
+        die('Raport wysłany na e-mail: ' . get_option('admin_email'));
+    }
+});
