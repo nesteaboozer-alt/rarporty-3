@@ -17,10 +17,13 @@ class TSKF_Email {
 
             $merged = array_unique(array_filter(array_merge($arr,$arr2)));
             if (!empty($merged)) {
-                $prod      = $item->get_product();
-                $product_id = $prod ? $prod->get_id() : 0;
+                $prod = $item->get_product();
+                
+                // POPRAWKA: Pobieramy ID produktu głównego (nadrzędnego), a nie wariantu
+                // W WC_Order_Item_Product metoda get_product_id() zawsze zwraca ID produktu głównego
+                $main_product_id = $item->get_product_id(); 
 
-                $is_zabieg = $product_id ? has_term( 'zabieg', 'product_cat', $product_id ) : false;
+                $is_zabieg = $main_product_id ? has_term( 'zabieg', 'product_cat', $main_product_id ) : false;
 
                 $out[] = [
                     'product'   => $prod ? $prod->get_name() : 'Produkt',
