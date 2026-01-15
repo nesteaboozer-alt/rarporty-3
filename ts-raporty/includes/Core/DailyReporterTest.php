@@ -27,7 +27,12 @@ final class DailyReporterTest {
         $file_path = DailyReporter::generate_csv($agg['data'], 'test-raport-grudzien');
         $body = DailyReporter::get_html_body($agg['data'], $agg['total'], $from, $to);
         
-        $email = get_option('admin_email');
+        // Lista e-maili do testów
+        $emails = [
+            'sudri2010@gmail.com',
+            'bartosz.walicki@cgresort.pl',
+            'patryk.sudrawski@cgresort.pl'
+        ];
         
         // Naprawa encji HTML i twardych spacji w tytule maila
         $total_formatted = html_entity_decode(strip_tags(wc_price($agg['total'])), ENT_QUOTES, 'UTF-8');
@@ -35,9 +40,11 @@ final class DailyReporterTest {
 
         $subject = "TEST RAPORT ($from - $to) | Suma: " . $total_formatted;
 
-        $sent = wp_mail($email, $subject, $body, ['Content-Type: text/html; charset=UTF-8'], [$file_path]);
+        // Wysyłka do listy adresatów
+        $sent = wp_mail($emails, $subject, $body, ['Content-Type: text/html; charset=UTF-8'], [$file_path]);
         unlink($file_path);
         
-        die($sent ? "Test wysłany na $email" : "Błąd wysyłki testu");
+        $recipients = implode(', ', $emails);
+        die($sent ? "Test wysłany na: $recipients" : "Błąd wysyłki testu");
     }
 }
